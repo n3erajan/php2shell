@@ -1,0 +1,24 @@
+services:
+  target:
+    image: php:8.5.11-apache
+    platform: linux/amd64
+    ports:
+      - "127.0.0.1:${P2S_PORT:-8091}:80"
+    # No host mount. The docroot lives only inside the container, so the
+    # proof file is reachable exclusively through the HTTP fetch in
+    # exploit.py -- not from a host directory.
+    # setarch -R needs the personality syscall, which the default Docker
+    # seccomp profile blocks. Unconfined seccomp keeps this portable across
+    # Linux hosts as well as Docker Desktop.
+    security_opt:
+      - seccomp=unconfined
+    command:
+      - /bin/sh
+      - -c
+      - |
+        printf 'KeepAlive Off\n<IfModule mpm_prefork_module>\nStartServers 1\nMinSpareServers 1\nMaxSpareServers 1\nMaxRequestWorkers 1\nServerLimit 1\nMaxConnectionsPerChild 0\n</IfModule>\n' > /etc/apache2/conf-enabled/zz-single-worker.conf
+        find /var/www/html -mindepth 1 -delete
+        printf '%s\n' '<?php echo "OK";' > /var/www/html/index.php
+        chown -R www-data:www-data /var/www/html
+        exec setarch x86_64 -R apache2-foreground
+    restart: unless-stopped
