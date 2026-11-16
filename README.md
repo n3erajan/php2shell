@@ -183,5 +183,6 @@ The OOM-session stale reference, the forged `Set-Cookie` overread, and the
 167-byte fake-HashTable body follow Oracle-Security's public php-8.4.26 PoC
 (no licence; wire shapes re-implemented). The chunk-relative dispatch
 geometry and fixed-base measurements come from the dinosn php-cve research
-in this repository. The count-based leak extraction and fill-only worker
-rotation follow the ideas in `9bie/php2shell-bypass-aslr-exp` (`pure/`).
+this lab was extracted from. The count-based leak extraction and fill-only
+worker rotation follow the ideas in `9bie/php2shell-bypass-aslr-exp`
+(`pure/`).
